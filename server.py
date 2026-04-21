@@ -8,11 +8,12 @@ from RuTracker using the py-rutracker-client library and FastMCP.
 import asyncio
 import base64
 import os
+import re
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Annotated, Any
 
 from fastmcp import FastMCP, Context
+from bs4 import BeautifulSoup
 
 # Load .env file if present (optional convenience for local development)
 try:
@@ -63,7 +64,8 @@ mcp = FastMCP(
     name="RuTracker MCP Server",
     instructions=(
         "Search and download torrents from RuTracker. "
-        "Use search_torrents to find content, then download_torrent to get the .torrent file. "
+        "Use search_torrents to find content, get_torrent_info to read the description and quality/codec details, "
+        "then download_torrent to get the .torrent file as Base64. "
         "Credentials are read from RUTRACKER_LOGIN and RUTRACKER_PASSWORD environment variables."
     ),
     lifespan=lifespan,
@@ -172,21 +174,13 @@ async def search_all_pages(
 @mcp.tool()
 async def download_torrent(
     topic_id: Annotated[int, "RuTracker topic/torrent ID (integer)"],
-    save_path: Annotated[
-        str,
-        "Optional file path where the .torrent file should be saved. "
-        "If omitted the file content is returned as a Base64-encoded string.",
-    ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
     """
     Download a .torrent file from RuTracker by topic ID.
 
-    If save_path is provided, the file is written to that path and the tool
-    returns a confirmation dict with 'saved_to' and 'size_bytes' keys.
-
-    If save_path is omitted, the tool returns:
-      - content_base64: Base64-encoded .torrent file bytes
+    Returns:
+      - content_base64: Base64-encoded .torrent file bytes (pass to a BitTorrent client)
       - size_bytes: size of the torrent file in bytes
       - filename: suggested filename for the torrent
     """
@@ -205,22 +199,10 @@ async def download_torrent(
     except RuTrackerException as exc:
         raise ValueError(f"RuTracker error: {exc}") from exc
 
-    if ctx:
-        await ctx.report_progress(80, 100, "File received, processing")
-
     size_bytes = len(torrent_bytes)
     filename = f"rutracker_{topic_id}.torrent"
-
-    if save_path:
-        dest = Path(save_path)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(torrent_bytes)
-        if ctx:
-            await ctx.report_progress(100, 100, "Saved to disk")
-            await ctx.info(f"Torrent saved to '{dest}' ({size_bytes} bytes).")
-        return {"saved_to": str(dest.resolve()), "size_bytes": size_bytes, "filename": filename}
-
     content_b64 = base64.b64encode(torrent_bytes).decode("ascii")
+
     if ctx:
         await ctx.report_progress(100, 100, "Complete")
         await ctx.info(f"Torrent ready ({size_bytes} bytes).")
@@ -229,6 +211,120 @@ async def download_torrent(
         "content_base64": content_b64,
         "size_bytes": size_bytes,
         "filename": filename,
+    }
+
+
+@mcp.tool()
+async def get_torrent_info(
+    topic_id: Annotated[int, "RuTracker topic/torrent ID (integer)"],
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """
+    Fetch detailed information about a torrent from its RuTracker topic page.
+
+    Parses the forum topic to extract:
+      - title: full torrent title
+      - topic_id: the topic ID
+      - topic_url: URL to the forum topic page
+      - download_url: direct .torrent download URL
+      - category: forum category name
+      - description: full post body text with technical specs, quality notes, etc.
+      - description_html: raw HTML of the post body (preserves formatting)
+      - poster: username of the uploader
+      - poster_url: profile URL of the uploader
+      - magnet_link: magnet URI if present in the post
+
+    This is the primary tool for getting quality/codec/resolution info before downloading.
+    """
+    if ctx:
+        await ctx.info(f"Fetching topic info for ID {topic_id}…")
+        await ctx.report_progress(0, 100, "Fetching topic page")
+
+    client = _client(ctx)
+    base = "https://rutracker.org/forum"
+    topic_url = f"{base}/viewtopic.php?t={topic_id}"
+    download_url = f"{base}/dl.php?t={topic_id}"
+
+    try:
+        async with client.session.get(
+            topic_url,
+            ssl=client._ssl_context,
+            proxy=client.proxy,
+        ) as response:
+            if response.status != 200:
+                raise RuTrackerRequestError(
+                    f"Topic page returned HTTP {response.status}"
+                )
+            html = await response.text(encoding="utf-8", errors="replace")
+    except RuTrackerException:
+        raise
+    except Exception as exc:
+        raise RuTrackerRequestError(f"Failed to fetch topic page: {exc}") from exc
+
+    if ctx:
+        await ctx.report_progress(70, 100, "Parsing page")
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Title
+    title_tag = soup.find("h1", class_="maintitle") or soup.find("title")
+    title = title_tag.get_text(strip=True) if title_tag else ""
+
+    # Category
+    category = ""
+    cat_tag = soup.find("td", id="nav-top")
+    if cat_tag:
+        links = cat_tag.find_all("a")
+        if links:
+            category = links[-1].get_text(strip=True)
+
+    # First post body — contains description, specs, quality info
+    post_body = soup.find("div", class_="post_body")
+    description_html = ""
+    description = ""
+    if post_body:
+        description_html = str(post_body)
+        # Convert to readable text: replace <br> with newlines, strip tags
+        for br in post_body.find_all("br"):
+            br.replace_with("\n")
+        description = post_body.get_text(separator="\n").strip()
+        # Collapse excessive blank lines
+        description = re.sub(r"\n{3,}", "\n\n", description)
+
+    # Poster (uploader)
+    # Primary selector: RuTracker uses class="poster_nick" on the author link.
+    # Fallback: some themes use a generic "nick" class inside the post header.
+    poster = ""
+    poster_url = ""
+    poster_tag = soup.find("a", class_="poster_nick")
+    if not poster_tag:
+        poster_tag = soup.find("a", attrs={"class": re.compile(r"\bnick\b")})
+    if poster_tag:
+        poster = poster_tag.get_text(strip=True)
+        href = poster_tag.get("href", "")
+        poster_url = f"{base}/{href}" if href and not href.startswith("http") else href
+
+    # Magnet link
+    magnet_link = ""
+    magnet_tag = soup.find("a", href=re.compile(r"^magnet:"))
+    if magnet_tag:
+        magnet_link = magnet_tag["href"]
+
+    if ctx:
+        await ctx.report_progress(100, 100, "Done")
+        await ctx.info(f"Info fetched for topic {topic_id}: '{title}'")
+
+    return {
+        "topic_id": topic_id,
+        "title": title,
+        "topic_url": topic_url,
+        "download_url": download_url,
+        "category": category,
+        "poster": poster,
+        "poster_url": poster_url,
+        "magnet_link": magnet_link,
+        "description": description,
+        "description_html": description_html,
     }
 
 

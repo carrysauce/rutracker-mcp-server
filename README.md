@@ -12,7 +12,8 @@ Built with [FastMCP](https://github.com/PrefectHQ/fastmcp) and [py-rutracker-cli
 |------|-------------|
 | `search_torrents` | Search RuTracker by keyword on a specific page (50 results/page) |
 | `search_all_pages` | Parallel multi-page search with streaming progress updates |
-| `download_torrent` | Download a `.torrent` file by topic ID — save to disk or return as Base64 |
+| `get_torrent_info` | Fetch full description, quality/codec details, and metadata from a topic page |
+| `download_torrent` | Download a `.torrent` file by topic ID — returns Base64-encoded content |
 | `get_topic_url` | Get the forum page URL and direct download URL for a topic ID |
 
 All long-running tools use `ctx.report_progress()` and `ctx.info()` for **streaming progress feedback** in compatible clients.
@@ -131,11 +132,28 @@ Download a `.torrent` file.
 
 **Parameters:**
 - `topic_id` (int) — RuTracker topic/torrent ID
-- `save_path` (str, optional) — if provided, saves the file to this path; otherwise returns the file as Base64
 
-**Returns (save mode):** `{"saved_to": "/path/file.torrent", "size_bytes": 12345, "filename": "rutracker_12345.torrent"}`
+**Returns:** `{"content_base64": "...", "size_bytes": 12345, "filename": "rutracker_12345.torrent"}`
 
-**Returns (Base64 mode):** `{"content_base64": "...", "size_bytes": 12345, "filename": "rutracker_12345.torrent"}`
+The Base64 content can be decoded by the client or passed directly to a BitTorrent client API.
+
+---
+
+### `get_torrent_info`
+
+Fetch full metadata from a torrent's topic page, including quality/codec/resolution details typically found in the uploader's description.
+
+**Parameters:**
+- `topic_id` (int) — RuTracker topic/torrent ID
+
+**Returns:**
+- `title` — full torrent title
+- `category` — forum category
+- `poster` / `poster_url` — uploader name and profile link
+- `description` — full post text (technical specs, quality notes, plot, etc.)
+- `description_html` — raw HTML of the post body
+- `magnet_link` — magnet URI if present
+- `topic_url` / `download_url` — page and direct download URLs
 
 ---
 
