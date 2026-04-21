@@ -77,31 +77,44 @@ RUTRACKER_LOGIN=user RUTRACKER_PASSWORD=pass python server.py --transport stream
 RUTRACKER_LOGIN=user RUTRACKER_PASSWORD=pass python server.py --transport sse --host 0.0.0.0 --port 8000
 ```
 
-### Docker
+---
+
+## Self-Hosting with Docker
+
+### Build locally
 
 ```bash
 docker build -t rutracker-mcp .
 docker run -e RUTRACKER_LOGIN=user -e RUTRACKER_PASSWORD=pass -p 8000:8000 rutracker-mcp
 ```
 
----
+Point your MCP client at `http://localhost:8000/mcp`.
 
-## Railway Deployment
+### GitHub Actions — automated builds
 
-The repository includes a `Dockerfile` and `railway.toml` for one-click deployment to [Railway](https://railway.app).
+The repository ships a GitHub Actions workflow (`.github/workflows/docker-build.yml`) that automatically builds and pushes the Docker image to the **GitHub Container Registry (GHCR)** on every push to `main`.
 
-1. Push this repository to GitHub.
-2. Create a new Railway project and select **Deploy from GitHub repo**.
-3. In the Railway dashboard, set the following environment variables under **Variables**:
+The image is published at:
 
-   | Variable | Value |
-   |---|---|
-   | `RUTRACKER_LOGIN` | Your RuTracker username |
-   | `RUTRACKER_PASSWORD` | Your RuTracker password |
-   | `RUTRACKER_PROXY` | *(optional)* Proxy URL |
+```
+ghcr.io/<your-github-username>/rutracker-mcp-server:latest
+```
 
-4. Railway will build the Docker image and start the server on `streamable-http` transport automatically.
-5. Point your MCP client at the Railway-assigned public URL: `https://<your-app>.railway.app/mcp`
+To pull and run the pre-built image on your server:
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/<your-github-username>/rutracker-mcp-server:latest
+
+# Run it
+docker run -d \
+  -e RUTRACKER_LOGIN=user \
+  -e RUTRACKER_PASSWORD=pass \
+  -p 8000:8000 \
+  ghcr.io/<your-github-username>/rutracker-mcp-server:latest
+```
+
+The workflow tags each image with `latest` (on the default branch) and the short commit SHA, so you can pin to a specific build if needed.
 
 ---
 
