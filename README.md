@@ -77,6 +77,32 @@ RUTRACKER_LOGIN=user RUTRACKER_PASSWORD=pass python server.py --transport stream
 RUTRACKER_LOGIN=user RUTRACKER_PASSWORD=pass python server.py --transport sse --host 0.0.0.0 --port 8000
 ```
 
+### Docker
+
+```bash
+docker build -t rutracker-mcp .
+docker run -e RUTRACKER_LOGIN=user -e RUTRACKER_PASSWORD=pass -p 8000:8000 rutracker-mcp
+```
+
+---
+
+## Railway Deployment
+
+The repository includes a `Dockerfile` and `railway.toml` for one-click deployment to [Railway](https://railway.app).
+
+1. Push this repository to GitHub.
+2. Create a new Railway project and select **Deploy from GitHub repo**.
+3. In the Railway dashboard, set the following environment variables under **Variables**:
+
+   | Variable | Value |
+   |---|---|
+   | `RUTRACKER_LOGIN` | Your RuTracker username |
+   | `RUTRACKER_PASSWORD` | Your RuTracker password |
+   | `RUTRACKER_PROXY` | *(optional)* Proxy URL |
+
+4. Railway will build the Docker image and start the server on `streamable-http` transport automatically.
+5. Point your MCP client at the Railway-assigned public URL: `https://<your-app>.railway.app/mcp`
+
 ---
 
 ## Claude Desktop Integration
