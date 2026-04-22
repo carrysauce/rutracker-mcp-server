@@ -329,7 +329,7 @@ async def download_torrent(
     filename = f"{base_name}.torrent"
     mime_type = "application/x-bittorrent"
     uri = TypeAdapter(Annotated[AnyUrl, UrlConstraints(host_required=False)]).validate_python(
-        f"file:///{filename}"
+        f"rutracker://download/{topic_id}/{filename}"
     )
 
     if ctx:
