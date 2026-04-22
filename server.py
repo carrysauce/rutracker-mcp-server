@@ -6,6 +6,7 @@ from RuTracker using the py-rutracker-client library and FastMCP.
 """
 
 import asyncio
+import base64
 import os
 import re
 from contextlib import asynccontextmanager
@@ -14,7 +15,8 @@ from typing import Annotated, Any
 from fastmcp import FastMCP, Context
 from bs4 import BeautifulSoup
 from fastmcp.tools.base import ToolResult
-from fastmcp.utilities.types import File
+from mcp.types import BlobResourceContents, EmbeddedResource, TextContent
+from pydantic import AnyUrl, TypeAdapter, UrlConstraints
 
 # Load .env file if present (optional convenience for local development)
 try:
@@ -323,8 +325,12 @@ async def download_torrent(
         raise ValueError(f"RuTracker error: {exc}") from exc
 
     size_bytes = len(torrent_bytes)
-    filename = f"rutracker_{topic_id}.torrent"
+    base_name = f"rutracker_{topic_id}"
+    filename = f"{base_name}.torrent"
     mime_type = "application/x-bittorrent"
+    uri = TypeAdapter(Annotated[AnyUrl, UrlConstraints(host_required=False)]).validate_python(
+        f"file:///{filename}"
+    )
 
     if ctx:
         await ctx.report_progress(100, 100, "Complete")
@@ -332,8 +338,15 @@ async def download_torrent(
 
     return ToolResult(
         content=[
-            f"Attached {filename} as an MCP file resource.",
-            File(data=torrent_bytes, name=f"rutracker_{topic_id}", format="x-bittorrent"),
+            TextContent(type="text", text=f"Attached {filename} as an MCP file resource."),
+            EmbeddedResource(
+                type="resource",
+                resource=BlobResourceContents(
+                    uri=uri,
+                    mimeType=mime_type,
+                    blob=base64.b64encode(torrent_bytes).decode("ascii"),
+                ),
+            ),
         ],
         structured_content={
             "topic_id": topic_id,
