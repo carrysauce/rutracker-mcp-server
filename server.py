@@ -34,6 +34,8 @@ from py_rutracker.exceptions import (
 )
 from py_rutracker.utils import convert_unix_to_local_time, format_size
 
+RESOURCE_URI_ADAPTER = TypeAdapter(Annotated[AnyUrl, UrlConstraints(host_required=False)])
+
 
 # ---------------------------------------------------------------------------
 # Lifespan: create and share a single authenticated async client
@@ -328,7 +330,7 @@ async def download_torrent(
     base_name = f"rutracker_{topic_id}"
     filename = f"{base_name}.torrent"
     mime_type = "application/x-bittorrent"
-    uri = TypeAdapter(Annotated[AnyUrl, UrlConstraints(host_required=False)]).validate_python(
+    uri = RESOURCE_URI_ADAPTER.validate_python(
         f"rutracker://download/{topic_id}/{filename}"
     )
 
