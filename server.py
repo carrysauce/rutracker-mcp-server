@@ -6,7 +6,6 @@ from RuTracker using the py-rutracker-client library and FastMCP.
 """
 
 import asyncio
-import base64
 import os
 import re
 from contextlib import asynccontextmanager
@@ -14,6 +13,8 @@ from typing import Annotated, Any
 
 from fastmcp import FastMCP, Context
 from bs4 import BeautifulSoup
+from fastmcp.tools.base import ToolResult
+from fastmcp.utilities.types import File
 
 # Load .env file if present (optional convenience for local development)
 try:
@@ -29,6 +30,7 @@ from py_rutracker.exceptions import (
     RuTrackerException,
     RuTrackerRequestError,
 )
+from py_rutracker.utils import convert_unix_to_local_time, format_size
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +67,7 @@ mcp = FastMCP(
     instructions=(
         "Search and download torrents from RuTracker. "
         "Use search_torrents to find content, get_torrent_info to read the description and quality/codec details, "
-        "then download_torrent to get the .torrent file as Base64. "
+        "then download_torrent to get the .torrent file as an MCP file attachment. "
         "Credentials are read from RUTRACKER_LOGIN and RUTRACKER_PASSWORD environment variables."
     ),
     lifespan=lifespan,
@@ -79,6 +81,112 @@ mcp = FastMCP(
 def _client(ctx: Context) -> AsyncRuTrackerClient:
     """Retrieve the shared async client from the lifespan context."""
     return ctx.lifespan_context["rutracker_client"]
+
+
+def _forum_url(path: str) -> str:
+    """Convert RuTracker relative URLs to absolute forum URLs."""
+    if not path:
+        return ""
+    if path.startswith("http://") or path.startswith("https://") or path.startswith("magnet:"):
+        return path
+    return f"https://rutracker.org/forum/{path.lstrip('/')}"
+
+
+def _parse_search_results(html: str) -> list[dict[str, Any]]:
+    """Parse search results and include the row magnet link when present."""
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.find("table", id="tor-tbl")
+    tbody = table.find("tbody") if table else None
+    if not tbody:
+        return []
+
+    results: list[dict[str, Any]] = []
+    for row in tbody.find_all("tr"):
+        cells = row.find_all("td")
+        if len(cells) < 10:
+            continue
+
+        info_row = cells[1:]
+        approved = info_row[0].get("title", "")
+        if approved == "закрыто":
+            continue
+
+        category_link = info_row[1].find("a")
+        title_link = info_row[2].find("a", href=re.compile(r"viewtopic\.php"))
+        author_link = info_row[3].find("a")
+        download_link = info_row[4].find("a", href=re.compile(r"dl\.php"))
+        magnet_link = row.find("a", href=re.compile(r"^magnet:"))
+
+        title_url = _forum_url(title_link.get("href", "")) if title_link else ""
+        topic_id = 0
+        if title_link:
+            topic_id_raw = title_link.get("data-topic_id")
+            if topic_id_raw and topic_id_raw.isdigit():
+                topic_id = int(topic_id_raw)
+            else:
+                match = re.search(r"[?&]t=(\d+)", title_link.get("href", ""))
+                if match:
+                    topic_id = int(match.group(1))
+
+        size_bytes_raw = info_row[4].get("data-ts_text", "0")
+        size, unit = format_size(int(size_bytes_raw) if size_bytes_raw.isdigit() else 0)
+
+        seeders_text = info_row[5].get_text(strip=True)
+        leechers_text = info_row[6].get_text(strip=True)
+        downloads_text = info_row[7].get_text(strip=True)
+        added_epoch_raw = info_row[8].get("data-ts_text", "0")
+
+        results.append(
+            {
+                "topic_id": topic_id,
+                "approved": approved,
+                "category": category_link.get_text(strip=True) if category_link else "",
+                "category_url": _forum_url(category_link.get("href", "")) if category_link else "",
+                "title": title_link.get_text(strip=True) if title_link else "",
+                "title_url": title_url,
+                "topic_url": title_url,
+                "author": author_link.get_text(strip=True) if author_link else "",
+                "author_url": _forum_url(author_link.get("href", "")) if author_link else "",
+                "size": size,
+                "unit": unit,
+                "download_url": _forum_url(download_link.get("href", "")) if download_link else "",
+                "seedmed": int(seeders_text) if seeders_text.isdigit() else 0,
+                "leechmed": int(leechers_text) if leechers_text.isdigit() else 0,
+                "download_counter": int(downloads_text) if downloads_text.isdigit() else 0,
+                "added": convert_unix_to_local_time(int(added_epoch_raw))
+                if added_epoch_raw.isdigit()
+                else "",
+                "magnet_link": magnet_link.get("href", "") if magnet_link else "",
+            }
+        )
+
+    return results
+
+
+async def _search_page(
+    client: AsyncRuTrackerClient,
+    query: str,
+    page: int,
+) -> list[dict[str, Any]]:
+    """Fetch and parse a single RuTracker search page."""
+    try:
+        async with client.session.get(
+            "https://rutracker.org/forum/tracker.php",
+            params={"start": (page - 1) * 50, "nm": query},
+            ssl=client._ssl_context,
+            proxy=client.proxy,
+        ) as response:
+            if response.status != 200:
+                raise RuTrackerRequestError(
+                    f"Search page returned HTTP {response.status}"
+                )
+            return _parse_search_results(
+                await response.text(encoding="utf-8", errors="replace")
+            )
+    except RuTrackerRequestError:
+        raise
+    except Exception as exc:
+        raise RuTrackerRequestError(f"Search request failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +209,8 @@ async def search_torrents(
       - author / author_url: uploader name and profile URL
       - size / unit: file size and unit (GB, MB, etc.)
       - download_url: direct URL to the .torrent file page
+      - topic_url / title_url: topic page URL
+      - magnet_link: magnet URI when present on the search row
       - seedmed / leechmed: current seeders and leechers
       - download_counter: total number of downloads
       - added: date the torrent was added
@@ -112,7 +222,7 @@ async def search_torrents(
     client = _client(ctx)
 
     try:
-        results = await client.search(query, page=page, return_search_dict=True)
+        results = await _search_page(client, query, page)
     except RuTrackerRequestError as exc:
         raise ValueError(f"Search request failed: {exc}") from exc
     except RuTrackerException as exc:
@@ -148,8 +258,8 @@ async def search_all_pages(
 
     async def fetch_page(page: int) -> list[dict]:
         try:
-            return await client.search(query, page=page, return_search_dict=True)
-        except RuTrackerException:
+            return await _search_page(client, query, page)
+        except Exception:
             return []
 
     tasks = [fetch_page(p) for p in range(1, max_pages + 1)]
@@ -171,16 +281,29 @@ async def search_all_pages(
     return all_results
 
 
-@mcp.tool()
+@mcp.tool(
+    output_schema={
+        "type": "object",
+        "properties": {
+            "topic_id": {"type": "integer"},
+            "filename": {"type": "string"},
+            "size_bytes": {"type": "integer"},
+            "mime_type": {"type": "string"},
+            "delivery": {"type": "string"},
+        },
+        "required": ["topic_id", "filename", "size_bytes", "mime_type", "delivery"],
+        "additionalProperties": False,
+    }
+)
 async def download_torrent(
     topic_id: Annotated[int, "RuTracker topic/torrent ID (integer)"],
     ctx: Context = None,
-) -> dict[str, Any]:
+) -> ToolResult:
     """
     Download a .torrent file from RuTracker by topic ID.
 
     Returns:
-      - content_base64: Base64-encoded .torrent file bytes (pass to a BitTorrent client)
+      - embedded MCP file attachment with the .torrent bytes
       - size_bytes: size of the torrent file in bytes
       - filename: suggested filename for the torrent
     """
@@ -201,17 +324,25 @@ async def download_torrent(
 
     size_bytes = len(torrent_bytes)
     filename = f"rutracker_{topic_id}.torrent"
-    content_b64 = base64.b64encode(torrent_bytes).decode("ascii")
+    mime_type = "application/x-bittorrent"
 
     if ctx:
         await ctx.report_progress(100, 100, "Complete")
         await ctx.info(f"Torrent ready ({size_bytes} bytes).")
 
-    return {
-        "content_base64": content_b64,
-        "size_bytes": size_bytes,
-        "filename": filename,
-    }
+    return ToolResult(
+        content=[
+            f"Attached {filename} as an MCP file resource.",
+            File(data=torrent_bytes, name=f"rutracker_{topic_id}", format="x-bittorrent"),
+        ],
+        structured_content={
+            "topic_id": topic_id,
+            "filename": filename,
+            "size_bytes": size_bytes,
+            "mime_type": mime_type,
+            "delivery": "embedded_resource",
+        },
+    )
 
 
 @mcp.tool()
