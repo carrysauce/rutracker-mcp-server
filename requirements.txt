@@ -1,3 +1,3 @@
 fastmcp>=3.2.0
-py-rutracker-client @ git+https://github.com/carrysauce/py_rutracker.git@copilot/add-magnet-link-to-search-output
+py-rutracker-client @ git+https://github.com/carrysauce/py_rutracker.git@aa606c72ab28aa3b13b2496208d333f77f457bc2
 python-dotenv>=1.0.0

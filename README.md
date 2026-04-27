@@ -2,7 +2,7 @@
 
 A **Model Context Protocol (MCP) server** for [RuTracker](https://rutracker.org) — the popular Russian torrent tracker.
 
-Built with [FastMCP](https://github.com/PrefectHQ/fastmcp) and a forked [py-rutracker-client](https://github.com/carrysauce/py_rutracker/tree/copilot/add-magnet-link-to-search-output), this server exposes RuTracker search and download functionality as MCP tools that can be used directly by Claude (Desktop or API) and other MCP-compatible clients.
+Built with [FastMCP](https://github.com/PrefectHQ/fastmcp) and a forked [py-rutracker-client](https://github.com/carrysauce/py_rutracker/tree/copilot/add-magnet-link-to-search-output) (pinned in `requirements.txt` to the current commit from that branch), this server exposes RuTracker search and download functionality as MCP tools that can be used directly by Claude (Desktop or API) and other MCP-compatible clients.
 
 ---
 
