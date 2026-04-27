@@ -33,7 +33,9 @@ from py_rutracker.exceptions import (
     RuTrackerRequestError,
 )
 
-RESOURCE_URI_ADAPTER = TypeAdapter(Annotated[AnyUrl, UrlConstraints(host_required=False)])
+MCP_RESOURCE_URI_ADAPTER = TypeAdapter(
+    Annotated[AnyUrl, UrlConstraints(host_required=False)]
+)
 
 
 # ---------------------------------------------------------------------------
@@ -238,8 +240,8 @@ async def download_torrent(
     base_name = f"rutracker_{topic_id}"
     filename = f"{base_name}.torrent"
     mime_type = "application/x-bittorrent"
-    uri = RESOURCE_URI_ADAPTER.validate_python(
-        f"rutracker://download/{topic_id}/{filename}"
+    uri = MCP_RESOURCE_URI_ADAPTER.validate_python(
+        f"file:///virtual/rutracker/{topic_id}/{filename}"
     )
 
     if ctx:
