@@ -2,7 +2,7 @@
 
 A **Model Context Protocol (MCP) server** for [RuTracker](https://rutracker.org) — the popular Russian torrent tracker.
 
-Built with [FastMCP](https://github.com/PrefectHQ/fastmcp) and [py-rutracker-client](https://pypi.org/project/py-rutracker-client/), this server exposes RuTracker search and download functionality as MCP tools that can be used directly by Claude (Desktop or API) and other MCP-compatible clients.
+Built with [FastMCP](https://github.com/PrefectHQ/fastmcp) and a forked [py-rutracker-client](https://github.com/carrysauce/py_rutracker/tree/copilot/add-magnet-link-to-search-output), this server exposes RuTracker search and download functionality as MCP tools that can be used directly by Claude (Desktop or API) and other MCP-compatible clients.
 
 ---
 
@@ -10,7 +10,7 @@ Built with [FastMCP](https://github.com/PrefectHQ/fastmcp) and [py-rutracker-cli
 
 | Tool | Description |
 |------|-------------|
-| `search_torrents` | Search RuTracker by keyword on a specific page (50 results/page, with magnet links when present) |
+| `search_torrents` | Search RuTracker by keyword on a specific page (50 results/page, with magnet URLs from the client library) |
 | `search_all_pages` | Parallel multi-page search with streaming progress updates |
 | `get_torrent_info` | Fetch full description, quality/codec details, and metadata from a topic page |
 | `download_torrent` | Download a `.torrent` file by topic ID — returns an MCP file attachment plus metadata |
@@ -22,7 +22,7 @@ All long-running tools use `ctx.report_progress()` and `ctx.info()` for **stream
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.13+
 - A valid [RuTracker](https://rutracker.org) account
 - `pip install -r requirements.txt`
 
@@ -149,7 +149,7 @@ Search for torrents on page N.
 - `query` (str) — search keywords
 - `page` (int, default `1`) — page number (50 results per page)
 
-**Returns:** list of torrent objects with `topic_id`, `title`, `category`, `author`, `size`, `unit`, `download_url`, `topic_url`, `title_url`, `magnet_link`, `seedmed`, `leechmed`, `download_counter`, `added`.
+**Returns:** list of torrent objects with `topic_id`, `title`, `category`, `author`, `size`, `unit`, `download_url`, `title_url`, `magnet_url`, `seedmed`, `leechmed`, `download_counter`, `added`.
 
 ---
 
