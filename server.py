@@ -12,8 +12,8 @@ import re
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastmcp import FastMCP, Context
 from bs4 import BeautifulSoup
+from fastmcp import Context, FastMCP
 from fastmcp.tools.base import ToolResult
 from mcp.types import BlobResourceContents, EmbeddedResource, TextContent
 from pydantic import AnyUrl, TypeAdapter, UrlConstraints
@@ -182,11 +182,26 @@ async def search_all_pages(
     output_schema={
         "type": "object",
         "properties": {
-            "topic_id": {"type": "integer"},
-            "filename": {"type": "string"},
-            "size_bytes": {"type": "integer"},
-            "mime_type": {"type": "string"},
-            "delivery": {"type": "string"},
+            "topic_id": {
+                "type": "integer",
+                "description": "RuTracker topic ID used for the download.",
+            },
+            "filename": {
+                "type": "string",
+                "description": "Suggested filename for the downloaded .torrent file.",
+            },
+            "size_bytes": {
+                "type": "integer",
+                "description": "Torrent file size in bytes.",
+            },
+            "mime_type": {
+                "type": "string",
+                "description": "MIME type of the embedded MCP file resource.",
+            },
+            "delivery": {
+                "type": "string",
+                "description": "How the torrent payload is returned to the client.",
+            },
         },
         "required": ["topic_id", "filename", "size_bytes", "mime_type", "delivery"],
         "additionalProperties": False,
