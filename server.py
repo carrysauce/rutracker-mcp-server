@@ -33,7 +33,7 @@ from py_rutracker.exceptions import (
     RuTrackerRequestError,
 )
 
-MCP_RESOURCE_URI_ADAPTER = TypeAdapter(
+_mcp_resource_uri_adapter = TypeAdapter(
     Annotated[AnyUrl, UrlConstraints(host_required=False)]
 )
 
@@ -221,6 +221,9 @@ async def download_torrent(
       - size_bytes: size of the torrent file in bytes
       - filename: suggested filename for the torrent
     """
+    if topic_id <= 0:
+        raise ValueError("topic_id must be a positive integer")
+
     if ctx:
         await ctx.info(f"Downloading torrent file for topic ID {topic_id}…")
         await ctx.report_progress(0, 100, "Initiating download")
@@ -240,7 +243,7 @@ async def download_torrent(
     base_name = f"rutracker_{topic_id}"
     filename = f"{base_name}.torrent"
     mime_type = "application/x-bittorrent"
-    uri = MCP_RESOURCE_URI_ADAPTER.validate_python(
+    uri = _mcp_resource_uri_adapter.validate_python(
         f"file:///virtual/rutracker/{topic_id}/{filename}"
     )
 
