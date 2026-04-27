@@ -2,7 +2,7 @@
 
 A **Model Context Protocol (MCP) server** for [RuTracker](https://rutracker.org) — the popular Russian torrent tracker.
 
-Built with [FastMCP](https://github.com/PrefectHQ/fastmcp) and [py-rutracker-client](https://pypi.org/project/py-rutracker-client/), this server exposes RuTracker search and download functionality as MCP tools that can be used directly by Claude (Desktop or API) and other MCP-compatible clients.
+Built with [FastMCP](https://github.com/PrefectHQ/fastmcp) and a forked [py-rutracker-client](https://github.com/carrysauce/py_rutracker/tree/copilot/add-magnet-link-to-search-output) (pinned in `requirements.txt` to the current commit from that branch), this server exposes RuTracker search and download functionality as MCP tools that can be used directly by Claude (Desktop or API) and other MCP-compatible clients.
 
 ---
 
@@ -10,10 +10,10 @@ Built with [FastMCP](https://github.com/PrefectHQ/fastmcp) and [py-rutracker-cli
 
 | Tool | Description |
 |------|-------------|
-| `search_torrents` | Search RuTracker by keyword on a specific page (50 results/page) |
+| `search_torrents` | Search RuTracker by keyword on a specific page (50 results/page, with magnet URLs from the client library) |
 | `search_all_pages` | Parallel multi-page search with streaming progress updates |
 | `get_torrent_info` | Fetch full description, quality/codec details, and metadata from a topic page |
-| `download_torrent` | Download a `.torrent` file by topic ID — returns Base64-encoded content |
+| `download_torrent` | Download a `.torrent` file by topic ID — returns an MCP file attachment plus metadata |
 | `get_topic_url` | Get the forum page URL and direct download URL for a topic ID |
 
 All long-running tools use `ctx.report_progress()` and `ctx.info()` for **streaming progress feedback** in compatible clients.
@@ -22,7 +22,7 @@ All long-running tools use `ctx.report_progress()` and `ctx.info()` for **stream
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.13+
 - A valid [RuTracker](https://rutracker.org) account
 - `pip install -r requirements.txt`
 
@@ -149,7 +149,7 @@ Search for torrents on page N.
 - `query` (str) — search keywords
 - `page` (int, default `1`) — page number (50 results per page)
 
-**Returns:** list of torrent objects with `topic_id`, `title`, `category`, `author`, `size`, `unit`, `download_url`, `seedmed`, `leechmed`, `download_counter`, `added`.
+**Returns:** list of torrent objects with `topic_id`, `title`, `category`, `author`, `size`, `unit`, `download_url`, `title_url`, `magnet_url`, `seedmed`, `leechmed`, `download_counter`, `added`.
 
 ---
 
@@ -172,9 +172,9 @@ Download a `.torrent` file.
 **Parameters:**
 - `topic_id` (int) — RuTracker topic/torrent ID
 
-**Returns:** `{"content_base64": "...", "size_bytes": 12345, "filename": "rutracker_12345.torrent"}`
+**Returns:** an embedded MCP file/resource containing the `.torrent` bytes, plus structured metadata like `topic_id`, `filename`, `size_bytes`, `mime_type`, and `delivery`.
 
-The Base64 content can be decoded by the client or passed directly to a BitTorrent client API.
+This works better with MCP-native clients than returning raw Base64 inside JSON.
 
 ---
 
@@ -212,4 +212,3 @@ Get page and download URLs for a topic.
 - RuTracker may require solving a CAPTCHA on first login or after inactivity. If authentication fails, log in via a browser on the same IP first.
 - This server downloads **only `.torrent` metadata files**, not the actual torrent content. Use a BitTorrent client (qBittorrent, Transmission, etc.) to download the content.
 - The server authenticates once at startup and reuses the session for the lifetime of the process.
-

@@ -12,8 +12,11 @@ import re
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastmcp import FastMCP, Context
 from bs4 import BeautifulSoup
+from fastmcp import Context, FastMCP
+from fastmcp.tools.base import ToolResult
+from mcp.types import BlobResourceContents, EmbeddedResource, TextContent
+from pydantic import AnyUrl, TypeAdapter, UrlConstraints
 
 # Load .env file if present (optional convenience for local development)
 try:
@@ -28,6 +31,10 @@ from py_rutracker.exceptions import (
     RuTrackerDownloadError,
     RuTrackerException,
     RuTrackerRequestError,
+)
+
+_mcp_resource_uri_adapter = TypeAdapter(
+    Annotated[AnyUrl, UrlConstraints(host_required=False)]
 )
 
 
@@ -65,7 +72,7 @@ mcp = FastMCP(
     instructions=(
         "Search and download torrents from RuTracker. "
         "Use search_torrents to find content, get_torrent_info to read the description and quality/codec details, "
-        "then download_torrent to get the .torrent file as Base64. "
+        "then download_torrent to get the .torrent file as an MCP file attachment. "
         "Credentials are read from RUTRACKER_LOGIN and RUTRACKER_PASSWORD environment variables."
     ),
     lifespan=lifespan,
@@ -101,6 +108,8 @@ async def search_torrents(
       - author / author_url: uploader name and profile URL
       - size / unit: file size and unit (GB, MB, etc.)
       - download_url: direct URL to the .torrent file page
+      - title_url: topic page URL
+      - magnet_url: magnet URI when provided by the library
       - seedmed / leechmed: current seeders and leechers
       - download_counter: total number of downloads
       - added: date the torrent was added
@@ -171,19 +180,50 @@ async def search_all_pages(
     return all_results
 
 
-@mcp.tool()
+@mcp.tool(
+    output_schema={
+        "type": "object",
+        "properties": {
+            "topic_id": {
+                "type": "integer",
+                "description": "RuTracker topic ID used for the download.",
+            },
+            "filename": {
+                "type": "string",
+                "description": "Suggested filename for the downloaded .torrent file.",
+            },
+            "size_bytes": {
+                "type": "integer",
+                "description": "Torrent file size in bytes.",
+            },
+            "mime_type": {
+                "type": "string",
+                "description": "MIME type of the embedded MCP file resource.",
+            },
+            "delivery": {
+                "type": "string",
+                "description": "How the torrent payload is returned to the client.",
+            },
+        },
+        "required": ["topic_id", "filename", "size_bytes", "mime_type", "delivery"],
+        "additionalProperties": False,
+    }
+)
 async def download_torrent(
     topic_id: Annotated[int, "RuTracker topic/torrent ID (integer)"],
     ctx: Context = None,
-) -> dict[str, Any]:
+) -> ToolResult:
     """
     Download a .torrent file from RuTracker by topic ID.
 
     Returns:
-      - content_base64: Base64-encoded .torrent file bytes (pass to a BitTorrent client)
+      - embedded MCP file attachment with the .torrent bytes
       - size_bytes: size of the torrent file in bytes
       - filename: suggested filename for the torrent
     """
+    if topic_id <= 0:
+        raise ValueError("topic_id must be a positive integer")
+
     if ctx:
         await ctx.info(f"Downloading torrent file for topic ID {topic_id}…")
         await ctx.report_progress(0, 100, "Initiating download")
@@ -200,18 +240,37 @@ async def download_torrent(
         raise ValueError(f"RuTracker error: {exc}") from exc
 
     size_bytes = len(torrent_bytes)
-    filename = f"rutracker_{topic_id}.torrent"
-    content_b64 = base64.b64encode(torrent_bytes).decode("ascii")
+    base_name = f"rutracker_{topic_id}"
+    filename = f"{base_name}.torrent"
+    mime_type = "application/x-bittorrent"
+    uri = _mcp_resource_uri_adapter.validate_python(
+        f"file:///virtual/rutracker/{topic_id}/{filename}"
+    )
 
     if ctx:
         await ctx.report_progress(100, 100, "Complete")
         await ctx.info(f"Torrent ready ({size_bytes} bytes).")
 
-    return {
-        "content_base64": content_b64,
-        "size_bytes": size_bytes,
-        "filename": filename,
-    }
+    return ToolResult(
+        content=[
+            TextContent(type="text", text=f"Attached {filename} as an MCP file resource."),
+            EmbeddedResource(
+                type="resource",
+                resource=BlobResourceContents(
+                    uri=uri,
+                    mimeType=mime_type,
+                    blob=base64.b64encode(torrent_bytes).decode("ascii"),
+                ),
+            ),
+        ],
+        structured_content={
+            "topic_id": topic_id,
+            "filename": filename,
+            "size_bytes": size_bytes,
+            "mime_type": mime_type,
+            "delivery": "embedded_resource",
+        },
+    )
 
 
 @mcp.tool()
